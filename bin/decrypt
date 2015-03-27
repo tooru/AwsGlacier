@@ -1,0 +1,40 @@
+#!/bin/sh
+
+usage_exit() {
+        echo "Usage: $0 [-a algorithm] [-o outfile] [-p file] file" 1>&2
+        exit 1
+}
+
+ALGORITHM="aes-256-cbc"
+OUT_FILE=""
+PASS_FILE=""
+
+while getopts o:p:h OPT
+do
+    case $OPT in
+        a)  ALGORITHM=$OPTARG
+            ;;
+        o)  OUT_FILE=$OPTARG
+            ;;
+        p)  PASS_FILE=$OPTARG
+            ;;
+        \?) usage_exit
+            ;;
+    esac
+done
+
+shift $((OPTIND - 1))
+
+if [ $# -lt 1 ]; then
+    usage_exit
+fi
+
+IN=$1
+
+OPT=""
+
+if [ z"$PASS_FILE" != z ]; then
+    OPT=${OPT}" -pass file:${PASS_FILE}"
+fi
+
+openssl enc -d -${ALGORITHM} -in ${IN} -out ${OUT_FILE} ${OPT}

@@ -31,6 +31,10 @@ fi
 
 IN=$1
 
+if [ z"$OUT_FILE" -eq z ]; then
+    OUT_FILE=$IN.dec
+fi
+
 OPT=""
 
 if [ z"$PASS_FILE" != z ]; then

@@ -23,6 +23,7 @@ do
     esac
 done
 
+
 shift $((OPTIND - 1))
 
 if [ $# -lt 1 ]; then
@@ -30,6 +31,10 @@ if [ $# -lt 1 ]; then
 fi
 
 IN=$1
+
+if [ z"$OUT_FILE" -eq z ]; then
+    OUT_FILE=$IN.enc
+fi
 
 OPT=""
 

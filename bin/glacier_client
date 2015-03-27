@@ -142,7 +142,7 @@ Usage: glacier_client [global_options] [sumcommand [options]]
  subcommand:
    upload_archive, ua : Upload archive. If archive size is larger than part size, archive is uploaded by multipart upload.
    delete_archive, da : Delete archive.
-   list_archives, la  : List archive that is uploaded by this command.
+   list_archives, la  : List archive that is uploaded by this command.(NYI)
    create_vault, cv   : Create vault.
    delete_vault, dv   : Delete vault. If vault is not empty, vault can't delete. It's Glacier future.
    list_vaults, lv    : List vaults.
@@ -161,7 +161,7 @@ EOS
   credentials = CSV.read(credentials, headers: true)[0]
 
   case command
-  when "upload_archive"
+  when "upload_archive", "ua"
     options = {}
     sub_opt = OptionParser.new
     sub_opt.banner = "Usage: glacier_client [global_options] upload_archive [options] vault file"
@@ -198,7 +198,7 @@ EOS
     file = args.shift
 
     GlacierClient.new(account_id, credentials).upload_archive(vault, file, options)
-  when "delete_archive"
+  when "delete_archive", "da"
     unless args.length >= 2
       puts opt.help
       exit 1
@@ -209,7 +209,10 @@ EOS
     archive_id = args.shift
 
     GlacierClient.new(account_id, credentials).delete_archive(vault, archive_id)
-  when "create_vault"
+  when "list_archives", "la"
+    puts opt.help
+    exit 1
+  when "create_vault", "cv"
     unless args.length >= 1
       puts opt.help
       exit 1
@@ -219,7 +222,7 @@ EOS
     vault = args.shift
 
     GlacierClient.new(account_id, credentials).create_vault(vault)
-  when "delete_vault"
+  when "delete_vault", "dv"
     unless args.length >= 1
       puts opt.help
       exit 1
@@ -228,7 +231,7 @@ EOS
     vault = args.shift
 
     GlacierClient.new(account_id, credentials).delete_vault(vault)
-  when "list_vaults"
+  when "list_vaults", "lv"
     unless args.length >= 1
       puts opt.help
       exit 1

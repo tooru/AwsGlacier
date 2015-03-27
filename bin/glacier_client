@@ -1,0 +1,260 @@
+#!/usr/bin/env ruby
+
+require 'aws-sdk'
+require 'csv'
+require 'fileutils'
+require 'logger'
+require 'optparse'
+
+class GlacierClient
+  CHUNK_SIZE = 1024 * 1024
+  DEFAULT_PART_SIZE = 64 * 1024 * 1024
+
+  def initialize(account_id, credentials)
+    @account_id = account_id
+    @client = Aws::Glacier::Client.new(
+      region: "ap-northeast-1",
+      access_key_id: credentials["Access Key Id"],
+      secret_access_key: credentials["Secret Access Key"],
+      logger: Logger.new(STDOUT),
+    )
+    @glacier_dir = File.join(ENV["HOME"], ".aws/glacier")
+  end
+
+  def upload_archive(vault, file, options={})
+    time = Time.now
+
+    part_size = options["part_size"] || DEFAULT_PART_SIZE
+
+    if (File.size(file) < part_size)
+      complete = upload_small_archive(vault, file)
+    else
+      complete = upload_multipart_part(vault, file, part_size, options)
+    end
+
+    FileUtils.mkdir_p(@glacier_dir)
+    CSV.open(File.join(@glacier_dir, "files.csv"), "ab") do |csv|
+      csv << [Time.now, vault, File.basename(file), true, complete.location, complete.archive_id, complete.checksum]
+    end
+
+    puts "location  : " + complete.location
+    puts "archive_id: " + complete.archive_id
+  end
+
+  def delete_archive(vault, archive_id, options={})
+    @client.delete_archive(
+      account_id: @account_id,
+      vault_name: vault,
+      archive_id: archive_id,
+    )
+  end
+
+  def create_vault(vault, options={})
+    @client.create_vault(
+      account_id: @account_id,
+      vault_name: vault
+    )
+  end
+
+  def delete_vault(vault, options={})
+    @client.delete_vault(
+      account_id: @account_id,
+      vault_name: vault
+    )
+  end
+
+  def list_vaults(options={})
+    @client.list_vaults(
+      account_id: @account_id,
+    )["vault_list"].each do |vault|
+      puts format("%s: %d archives, %d bytes", vault.vault_name, vault.number_of_archives, vault.size_in_bytes)
+    end
+  end
+
+  private
+  def upload_small_archive(vault, file, options={})
+    archive_hash = Aws::TreeHash.new()
+
+    body = ""
+    open(file) do |f|
+      while buf = f.read(CHUNK_SIZE)
+        body << buf
+        archive_hash.update(buf)
+      end
+    end
+
+    @client.upload_archive(
+      account_id: @account_id,
+      vault_name: vault,
+      archive_description: File.basename(file),
+      checksum: archive_hash.digest,
+      body: body,
+    )
+  end
+
+  def upload_multipart_part(vault, file, part_size, options={})
+    upload = @client.initiate_multipart_upload(
+      account_id: @account_id,
+      vault_name: vault,
+      archive_description: File.basename(file),
+      part_size: part_size,
+    )
+
+    archive_hash = Aws::TreeHash.new()
+
+    open(file) do |f|
+      offset = 0
+      while buf = f.read(part_size)
+        hash = Aws::TreeHash.new()
+        n_chunk = (buf.size.to_f / CHUNK_SIZE).ceil
+        n_chunk.times do |i|
+          chunk = buf.slice(CHUNK_SIZE * i, CHUNK_SIZE)
+          archive_hash.update(chunk)
+          hash.update(chunk)
+        end
+  
+        @client.upload_multipart_part(
+          account_id: @account_id,
+          vault_name: vault,
+          upload_id: upload.upload_id,
+          checksum: hash.digest,
+          range: "bytes #{offset}-#{offset + buf.size-1}/*",
+          body: buf,
+        )
+        offset += buf.size
+      end
+    end
+
+    @client.complete_multipart_upload(
+      account_id: @account_id,
+      vault_name: vault,
+      upload_id: upload.upload_id,
+      archive_size: File.size(file),
+      checksum: archive_hash.digest,
+    )
+  end
+end
+
+def main(args)
+  opt = OptionParser.new
+  opt.banner = <<EOS
+Usage: glacier_client [global_options] [sumcommand [options]]
+ subcommand:
+   upload_archive, ua : Upload archive. If archive size is larger than part size, archive is uploaded by multipart upload.
+   delete_archive, da : Delete archive.
+   list_archives, la  : List archive that is uploaded by this command.
+   create_vault, cv   : Create vault.
+   delete_vault, dv   : Delete vault. If vault is not empty, vault can't delete. It's Glacier future.
+   list_vaults, lv    : List vaults.
+EOS
+
+  opt.order!(args)
+  if args.empty?
+    $stderr.puts "no command"
+    $stderr.puts opt.help
+    exit 1
+  end
+
+  command = args.shift
+  
+  credentials = File.join(ENV["HOME"], ".aws/credentials.csv")
+  credentials = CSV.read(credentials, headers: true)[0]
+
+  case command
+  when "upload_archive"
+    options = {}
+    sub_opt = OptionParser.new
+    sub_opt.banner = "Usage: glacier_client [global_options] upload_archive [options] vault file"
+    sub_opt.on("-p", "--part-size [PART_SIZE[MG]]", "The part size must be a megabyte (1024 KB) multiplied by a power of 2.") do |psize|
+      part_size = -1
+      case psize
+      when /^\d+$/
+        part_size = psize.to_i
+      when /^\d+M$/
+        part_size = psize.to_i * 1024 * 1024
+      when /^\d+G$/
+        part_size = psize.to_i * 1024 * 1024 * 1024
+      else
+        puts format("'%s' is not valid part format", psize)
+        puts sub_opt.help
+        exit 1
+      end
+      unless _valid_part_size?(part_size)
+        puts format("'%s' is not valid part size", part_size)
+        puts sub_opt.help
+        exit 1
+      end
+      options["part_size"] = part_size
+    end
+    sub_opt.parse!(args)
+
+    unless args.length >= 2
+      puts sub_opt.help
+      exit 1
+    end
+
+    account_id = args.shift
+    vault = args.shift
+    file = args.shift
+
+    GlacierClient.new(account_id, credentials).upload_archive(vault, file, options)
+  when "delete_archive"
+    unless args.length >= 2
+      puts opt.help
+      exit 1
+    end
+
+    account_id = args.shift
+    vault = args.shift
+    archive_id = args.shift
+
+    GlacierClient.new(account_id, credentials).delete_archive(vault, archive_id)
+  when "create_vault"
+    unless args.length >= 1
+      puts opt.help
+      exit 1
+    end
+
+    account_id = args.shift
+    vault = args.shift
+
+    GlacierClient.new(account_id, credentials).create_vault(vault)
+  when "delete_vault"
+    unless args.length >= 1
+      puts opt.help
+      exit 1
+    end
+
+    vault = args.shift
+
+    GlacierClient.new(account_id, credentials).delete_vault(vault)
+  when "list_vaults"
+    unless args.length >= 1
+      puts opt.help
+      exit 1
+    end
+    GlacierClient.new(account_id, credentials).list_vaults
+  else
+    $stderr.puts "no such subcommand: #{command}"
+    exit 1
+  end
+end
+
+def _valid_part_size?(size)
+  mega = 1024 * 1024
+  giga = mega * 1024
+  psize = 1 * mega
+  
+  while psize <= 4 * giga
+    if size < psize
+      return false
+    end
+    if psize === size
+      return true
+    end
+    psize *= 2
+  end
+  return false
+end
+
+main(ARGV)

@@ -34,7 +34,16 @@ class GlacierClient
 
     FileUtils.mkdir_p(@glacier_dir)
     CSV.open(File.join(@glacier_dir, "files.csv"), "ab") do |csv|
-      csv << [Time.now, vault, File.basename(file), true, complete.location, complete.archive_id, complete.checksum]
+      csv << [
+        Time.now,
+        vault,
+        File.basename(file),
+        File.size(file),
+        true,
+        complete.location,
+        complete.archive_id,
+        complete.checksum,
+      ]
     end
 
     puts "location  : " + complete.location
@@ -47,6 +56,34 @@ class GlacierClient
       vault_name: vault,
       archive_id: archive_id,
     )
+  end
+
+  TIME_FORMAT = "%F(%a) %T %Z(%z)"
+
+  def list_archives(options={})
+    verbose = options["verbose"]
+
+    row_separator = ""
+    CSV.foreach(File.join(@glacier_dir, "files.csv")) do |uploaded_date, vault, name, size, exists, location, id, checksum|
+      size = size.to_i
+      exists = exists == "true"
+
+      info = []
+      info << ["file name", name]
+      info << ["uploaded date", Time.parse(uploaded_date).strftime(TIME_FORMAT)]
+      info << ["vault", vault]
+      info << ["size", size == -1 ? "unknown" : size]
+      info << ["status", exists ? "archived" : "removed"]
+      info << ["archive id", id] if verbose
+      info << ["location", location] if verbose
+      info << ["checksum", checksum] if verbose
+
+      print row_separator
+      info.each do |name, value|
+        puts format("%-13s: %s", name, value)
+      end
+      row_separator = "-" * 150 + "\n"
+    end
   end
 
   def create_vault(vault, options={})
@@ -142,7 +179,7 @@ Usage: glacier_client [global_options] [sumcommand [options]]
  subcommand:
    upload_archive, ua : Upload archive. If archive size is larger than part size, archive is uploaded by multipart upload.
    delete_archive, da : Delete archive.
-   list_archives, la  : List archive that is uploaded by this command.(NYI)
+   list_archives, la  : List archive that is uploaded by this command.
    create_vault, cv   : Create vault.
    delete_vault, dv   : Delete vault. If vault is not empty, vault can't delete. It's Glacier future.
    list_vaults, lv    : List vaults.
@@ -210,8 +247,15 @@ EOS
 
     GlacierClient.new(account_id, credentials).delete_archive(vault, archive_id)
   when "list_archives", "la"
-    puts opt.help
-    exit 1
+    options = {}
+    sub_opt = OptionParser.new
+    sub_opt.banner = "Usage: glacier_client [global_options] list_archives [options]"
+    sub_opt.on("-v", "--verbose", "verbose mode.") do
+      options["verbose"] = true
+    end  
+    sub_opt.parse!(args)
+
+    GlacierClient.new(account_id, credentials).list_archives(options)
   when "create_vault", "cv"
     unless args.length >= 1
       puts opt.help

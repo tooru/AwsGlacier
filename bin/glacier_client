@@ -5,6 +5,7 @@ require 'csv'
 require 'fileutils'
 require 'logger'
 require 'optparse'
+require 'yaml'
 
 class GlacierClient
   CHUNK_SIZE = 1024 * 1024
@@ -64,25 +65,26 @@ class GlacierClient
     verbose = options["verbose"]
 
     row_separator = ""
-    CSV.foreach(File.join(@glacier_dir, "files.csv")) do |uploaded_date, vault, name, size, exists, location, id, checksum|
-      size = size.to_i
-      exists = exists == "true"
+    open(File.join(@glacier_dir, "files.yml")) do |f|
+      archives = YAML.load(f)
+      archives.each do |archive|
+        info = []
 
-      info = []
-      info << ["file name", name]
-      info << ["uploaded date", Time.parse(uploaded_date).strftime(TIME_FORMAT)]
-      info << ["vault", vault]
-      info << ["size", size == -1 ? "unknown" : size]
-      info << ["status", exists ? "archived" : "removed"]
-      info << ["archive id", id] if verbose
-      info << ["location", location] if verbose
-      info << ["checksum", checksum] if verbose
+        info << ["file name", archive["name"]]
+        info << ["uploaded date", archive["uploaded_date"].strftime(TIME_FORMAT)]
+        info << ["vault", archive["vault"]]
+        info << ["size", archive["size"] == -1 ? "unknown" : archive["size"]]
+        info << ["status", archive["exists"] ? "archived" : "removed"]
+        info << ["archive id", archive["archive_id"]] if verbose
+        info << ["location", archive["location"]] if verbose
+        info << ["checksum", archive["checksum"]] if verbose
 
-      print row_separator
-      info.each do |name, value|
-        puts format("%-13s: %s", name, value)
+        print row_separator
+        info.each do |name, value|
+          puts format("%-13s: %s", name, value)
+        end
+        row_separator = "-" * 150 + "\n"
       end
-      row_separator = "-" * 150 + "\n"
     end
   end
 

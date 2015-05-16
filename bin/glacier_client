@@ -34,17 +34,24 @@ class GlacierClient
     end
 
     FileUtils.mkdir_p(@glacier_dir)
-    CSV.open(File.join(@glacier_dir, "files.csv"), "ab") do |csv|
-      csv << [
-        Time.now,
-        vault,
-        File.basename(file),
-        File.size(file),
-        true,
-        complete.location,
-        complete.archive_id,
-        complete.checksum,
-      ]
+    archives = nil
+    open(File.join(@glacier_dir, "files.yml")) do |f|
+      archives = YAML.load(f)
+    end
+
+    archives << {
+      "uploaded_date" => Time.now,
+      "vault" => vault,
+      "name" => File.basename(file),
+      "size" => File.size(file),
+      "exists" => true,
+      "location" => complete.location,
+      "archive_id" => complete.archive_id,
+      "checksum" => complete.checksum,
+    }
+
+    open(File.join(@glacier_dir, "files.yml"), "w") do |f|
+      f.write(archives.to_yaml)
     end
 
     puts "location  : " + complete.location

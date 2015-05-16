@@ -73,7 +73,7 @@ class GlacierClient
         info << ["file name", archive["name"]]
         info << ["uploaded date", archive["uploaded_date"].strftime(TIME_FORMAT)]
         info << ["vault", archive["vault"]]
-        info << ["size", archive["size"] == -1 ? "unknown" : archive["size"]]
+        info << ["size", archive["size"] == -1 ? "unknown" : _format_size(archive["size"])]
         info << ["status", archive["exists"] ? "archived" : "removed"]
         info << ["archive id", archive["archive_id"]] if verbose
         info << ["location", archive["location"]] if verbose
@@ -171,6 +171,22 @@ class GlacierClient
       archive_size: File.size(file),
       checksum: archive_hash.digest,
     )
+  end
+
+  def _format_size(size)
+    format("%d (%s)", size, _hr(size))
+  end
+
+  UNIT = ["", "k", "M", "G", "T", "P"]
+
+  def _hr(size)
+    i = 0
+    hsize = size
+    while hsize >= 1024
+      i += 1
+      hsize = size / (1024.0 ** i + 1)
+    end
+    format("%.1f%s", hsize, UNIT[i])
   end
 end
 

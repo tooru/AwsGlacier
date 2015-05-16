@@ -32,7 +32,7 @@ fi
 
 IN=$1
 
-if [ z"$OUT_FILE" -eq z ]; then
+if [ z"$OUT_FILE" = z ]; then
     OUT_FILE=$IN.enc
 fi
 
